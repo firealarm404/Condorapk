@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000"><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
+<title>CÓNDOR Alertas</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+:root{--bg:#07090c;--sf:#12161c;--bd:#232a34;--tx:#f4f1ec;--mu:#9aa3b2;--or:#e8590c;--rd:#ff3b30;--ok:#2b8a3e}
+*{box-sizing:border-box;margin:0;padding:0}html,body{background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,Roboto,sans-serif}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{position:sticky;top:0;z-index:5;background:#000;border-bottom:2px solid var(--or);padding:10px 14px;display:flex;align-items:center;gap:10px}
+header img{height:34px;border-radius:6px}header b{flex:1;font-size:17px}
+.dot{width:12px;height:12px;border-radius:50%;background:#777}.dot.on{background:#3ddc84;box-shadow:0 0 10px #3ddc84}
+main{padding:12px 14px 40px;max-width:640px;margin:auto}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+button{font:inherit;cursor:pointer;border:1px solid var(--bd);background:var(--sf);color:var(--tx);border-radius:10px;padding:10px 14px}
+button.pri{background:var(--or);border-color:var(--or);font-weight:700}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}
+.ban{background:var(--rd);border-radius:14px;padding:14px;font-weight:800;font-size:19px;margin-bottom:12px}
+.k{color:var(--mu);font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;margin-top:8px}.v{font-size:18px;font-weight:600}
+.chip{display:inline-block;border-radius:20px;padding:2px 10px;font-size:13px;font-weight:700;background:#2a303a}
+.Alta{background:var(--rd)}.Media{background:var(--or)}.Baja{background:var(--ok)}
+.sel{display:flex;gap:8px;overflow:auto;margin-bottom:12px}.sel button{white-space:nowrap}.sel button.on{border-color:var(--or);background:#2a1a10}
+#mm{height:230px;border-radius:12px;margin-top:10px;border:1px solid var(--bd)}
+.u{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--bd)}.u:first-of-type{border-top:0}.u span.s{margin-left:auto}
+.n{border-left:3px solid var(--or);padding:2px 10px;margin:8px 0}.n small{color:var(--mu)}
+.ov{position:fixed;inset:0;z-index:50;background:var(--rd);display:none;flex-direction:column;justify-content:center;gap:14px;padding:24px}.ov.show{display:flex;animation:fl 1s infinite}
+@keyframes fl{50%{background:#b3180f}}.ov h1{font-size:34px;line-height:1.1}.ov p{font-size:22px}.ov button{background:#fff;color:#b3180f;font-weight:800;font-size:22px;padding:16px;border:0}
+.mu{color:var(--mu)}a.btn{display:inline-block;text-decoration:none;color:var(--tx);border:1px solid var(--bd);background:var(--sf);border-radius:10px;padding:10px 14px;margin:8px 8px 0 0}
+</style></head>
+<body>
+<header><img src="icon-192.png" alt=""><b>CÓNDOR Alertas</b><span id="st" class="mu" style="font-size:13px">Conectando…</span><span id="dot" class="dot"></span></header>
+<main><div class="bar"><button class="pri" id="bEn" onclick="enable()">🔔 Activar alertas</button><button id="bWl" onclick="toggleWl()">☀ Pantalla encendida: no</button></div><div id="app"><p class="mu">Cargando emergencias…</p></div></main>
+<div id="ov" class="ov"></div>
+<script>
+const ESC=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const T=t=>new Date(t).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}),D=t=>new Date(t).toLocaleString('es-CL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+let DOCS=[],SEL=null,SEEN=new Set(JSON.parse(localStorage.getItem('seen')||'[]')),PREV={},NOTES={},FIRST=true,ac=null,beepT=null,map=null,WLK=null,WLON=false;
+const icon=n=>/ambul/i.test(n)?'🚑':/bomba/i.test(n)?'🚒':'🚐';
+const scol=u=>u.st=='Disponible'?'#2b8a3e':/panne|colisi/i.test(u.st)?'#ff3b30':'#e8590c';
+function saveSeen(){try{localStorage.setItem('seen',JSON.stringify([...SEEN].slice(-200)))}catch(e){}}
+/* --- sonido, vibración, notificación --- */
+function unlock(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(ac&&ac.resume)ac.resume()}
+function beep(){if(!ac)return;const o=ac.createOscillator(),g=ac.createGain();o.type='square';o.frequency.value=880;g.gain.value=.18;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+.25)}
+function alarmStop(){clearInterval(beepT);beepT=null}
+function alarmStart(){alarmStop();let n=0;beep();beepT=setInterval(()=>{beep();if(navigator.vibrate)navigator.vibrate([250,120,250]);if(++n>=25)alarmStop()},900)}
+function notify(title,body,tag){try{if(window.Notification&&Notification.permission=='granted'&&navigator.serviceWorker){navigator.serviceWorker.ready.then(r=>r.showNotification(title,{body,tag,requireInteraction:true,vibrate:[300,150,300,150,600],icon:'icon-192.png',badge:'icon-192.png'}))}}catch(e){}}
+async function enable(){unlock();try{if(window.Notification&&Notification.permission!='granted')await Notification.requestPermission()}catch(e){}beep();upd()}
+async function toggleWl(){WLON=!WLON;try{if(WLON){WLK=await navigator.wakeLock.request('screen')}else if(WLK){await WLK.release();WLK=null}}catch(e){WLON=false}upd()}
+document.addEventListener('visibilitychange',async()=>{if(WLON&&document.visibilityState=='visible'){try{WLK=await navigator.wakeLock.request('screen')}catch(e){}}});
+function upd(){const en=window.Notification&&Notification.permission=='granted'&&ac;const b=document.getElementById('bEn');b.textContent=en?'🔔 Alertas activas':'🔔 Activar alertas';b.className=en?'':'pri';document.getElementById('bWl').textContent='☀ Pantalla encendida: '+(WLON?'sí':'no')}
+/* --- alertas de nuevos eventos --- */
+function showOv(h){const o=document.getElementById('ov');o.innerHTML=h;o.className='ov show'}
+function ack(id){alarmStop();document.getElementById('ov').className='ov';if(id)SEL=id;renderApp()}
+function alertNew(d){SEEN.add(d.id);saveSeen();SEL=d.id;alarmStart();notify('🚨 Emergencia #'+d.n+' · '+d.type,(d.loc&&d.loc.n||'')+(d.sub?'\n'+d.sub:''),'em'+d.id);
+showOv(`<h1>🚨 NUEVA EMERGENCIA #${ESC(d.n)}</h1><p><b>${ESC(d.type)}</b>${d.sub?' · '+ESC(d.sub):''}</p><p>📍 ${ESC(d.loc&&d.loc.n)}</p><p>Unidades: ${(d.units||[]).map(u=>ESC(u.n)).join(', ')||'—'}</p><button onclick="ack('${ESC(d.id)}')">ENTERADO · VER DETALLE</button>`)}
+function alertNote(d,n){alarmStart();setTimeout(alarmStop,3000);notify('📝 Nota · Emergencia #'+d.n,n.m,'nt'+d.id+n.t)}
+function onDocs(list){DOCS=list.filter(d=>d.st=='Activa'||(d.tc&&Date.now()-d.tc<864e5)).sort((a,b)=>b.t-a.t);
+DOCS.forEach(d=>{const was=PREV[d.id];
+if(d.st=='Activa'){if(!SEEN.has(d.id))alertNew(d);else if(!FIRST&&(d.notes||[]).length>(NOTES[d.id]||0))alertNote(d,d.notes[d.notes.length-1])}
+else if(was=='Activa'&&!FIRST)notify('✅ Emergencia #'+d.n+' cerrada',d.loc&&d.loc.n||'','cl'+d.id);
+PREV[d.id]=d.st;NOTES[d.id]=(d.notes||[]).length});FIRST=false;
+const act=DOCS.filter(d=>d.st=='Activa');if(!SEL||!DOCS.find(d=>d.id==SEL))SEL=(act[0]||DOCS[0]||{}).id||null;renderApp()}
+/* --- pantalla --- */
+function unitRow(u){return`<div class="u"><span style="font-size:26px">${icon(u.n)}</span><div><b>${ESC(u.n)}</b><div class="mu" style="font-size:13px">${ESC(u.base||'')}</div></div><span class="s chip" style="background:${scol(u)}">${ESC((u.k?u.k+' ':'')+u.st)}</span></div>`}
+function detail(d){const lat=d.loc&&d.loc.lat,lon=d.loc&&d.loc.lon,has=lat!=null&&lon!=null;
+return`<div class="card"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="font-size:20px">Emergencia #${ESC(d.n)}</b><span class="chip ${ESC(d.pri)}">${ESC(d.pri)}</span><span class="chip" style="background:${d.st=='Activa'?'#ff3b30':'#444'}">${d.st=='Activa'?'ACTIVA':'CERRADA'}</span></div>
+<div class="k">Dirección / ubicación</div><div class="v">📍 ${ESC(d.loc&&d.loc.n)}</div><div class="k">Tipo</div><div class="v">${ESC(d.type)}</div><div class="k">Subtipo</div><div class="v">${ESC(d.sub||'—')}</div><div class="k">Despacho</div><div class="v">${D(d.t)}</div>${d.desc?`<div class="k">Detalle</div><div>${ESC(d.desc)}</div>`:''}
+<div id="mm">${has?'':'<p class="mu" style="padding:14px">Esta emergencia no tiene coordenadas en el mapa.</p>'}</div>
+${has?`<a class="btn" href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank">🗺 Abrir en Maps</a><a class="btn" href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank">➡ Cómo llegar</a>`:''}</div>
+<div class="card"><b>Unidades despachadas</b>${(d.units||[]).map(unitRow).join('')||'<p class="mu">Sin unidades.</p>'}</div>
+<div class="card"><b>Notas</b>${(d.notes||[]).slice().reverse().map(n=>`<div class="n"><small>${T(n.t)} · ${ESC(n.u)}</small><br>${ESC(n.m)}</div>`).join('')||'<p class="mu">Sin notas.</p>'}</div>`}
+function renderApp(){const el=document.getElementById('app');if(map){try{map.remove()}catch(e){}map=null}
+const act=DOCS.filter(d=>d.st=='Activa'),sel=DOCS.find(d=>d.id==SEL);
+let h=act.length?`<div class="ban">🚨 ${act.length==1?'EMERGENCIA ACTIVA':act.length+' EMERGENCIAS ACTIVAS'}</div>`:`<div class="card"><b>✔ Sin emergencias activas</b><p class="mu">Aquí aparecerá cada emergencia apenas se despache.</p></div>`;
+if(DOCS.length>1)h+=`<div class="sel">${DOCS.map(d=>`<button class="${d.id==SEL?'on':''}" onclick="SEL='${ESC(d.id)}';renderApp()">${d.st=='Activa'?'🔴':'⚪'} #${ESC(d.n)} ${ESC(d.type)}</button>`).join('')}</div>`;
+if(sel)h+=detail(sel);el.innerHTML=h;upd();
+if(sel&&sel.loc&&sel.loc.lat!=null&&window.L){const m=L.map('mm',{zoomControl:true,attributionControl:false}).setView([sel.loc.lat,sel.loc.lon],15);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19}).addTo(m);
+L.marker([sel.loc.lat,sel.loc.lon],{icon:L.divIcon({className:'',html:'<div style="width:22px;height:22px;border-radius:50%;background:#ff3b30;border:3px solid #fff;box-shadow:0 0 0 8px #ff3b3055"></div>',iconSize:[22,22],iconAnchor:[11,11]})}).addTo(m);map=m}}
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+<script type="module">
+const cfg={apiKey:"AIzaSyB8HzQLbwEpOXG45GoBOZcdpg6K5ZSV7jQ",authDomain:"cad-emergencias-81868.firebaseapp.com",projectId:"cad-emergencias-81868",storageBucket:"cad-emergencias-81868.firebasestorage.app",messagingSenderId:"931365676119",appId:"1:931365676119:web:17f70575787b2ca14eaf12"};
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getFirestore,collection,query,orderBy,limit,onSnapshot} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {getAuth,signInAnonymously} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+const st=document.getElementById('st'),dot=document.getElementById('dot');
+try{const app=initializeApp(cfg),db=getFirestore(app);await signInAnonymously(getAuth(app));
+onSnapshot(query(collection(db,'alertas'),orderBy('t','desc'),limit(30)),s=>{st.textContent='En vivo';dot.className='dot on';window.onDocs(s.docs.map(d=>d.data()))},e=>{console.error(e);st.textContent='Sin conexión';dot.className='dot'})}
+catch(e){console.error(e);st.textContent='Error de conexión'}
+addEventListener('offline',()=>{st.textContent='Sin internet';dot.className='dot'});
+</script>
+</body></html>
